@@ -52,6 +52,7 @@ module load uv      # run.sh's preflight fails without uv on PATH
 uv sync             # once
 ./run.sh full       # the full four-drug run on an A100
 ./run.sh            # or the quick job: one drug, 8 isolates, 2h cap
+./run.sh demo       # or the smallest end-to-end run: a 16 GB card, 1h cap
 ```
 
 That is the whole happy path — submit, serve the model, run the three stages,
@@ -115,6 +116,96 @@ Everything below still works and `run.sh` passes it through:
 DRUGS="rifampicin isoniazid" LIMIT=20 ./run.sh full
 QUICK_LIMIT=4 ./run.sh
 ```
+
+### Showing the pipeline without waiting for a big card
+
+`./run.sh demo` is the tier below `quick`, for when the thing to demonstrate is
+that the pipeline runs end to end rather than what the numbers are.
+
+The queue, not the GPU hours, is what makes a run take an afternoon, and the
+number that decides the queue is the context window. A1 carries all 218 of its
+tools in its system prompt — 156k characters, ~39k tokens, on every step — so
+the server needs 40k of context, so it needs a card of at least 23 GB, so the
+job waits for one of a handful of Ampere nodes. `quick` relaxed the partition,
+the walltime and the card but could not relax that.
+
+The demo job breaks it. `TOOLS=1` passes `--tools`, which switches on biomni's
+prompt-based tool retriever: one selection call per run carrying the tool names
+and descriptions, and then a system prompt holding only the tools it picked.
+Measured on this repo's catalogue:
+
+| | chars | ~tokens |
+| --- | --- | --- |
+| full system prompt, every step | 156,008 | 39,000 |
+| `--tools`: the one selection call | 47,000 | 12,000 |
+| `--tools`: system prompt per step after it | 17,903 | 4,500 |
+
+So the peak prompt is ~13k rather than 39k, and 32k of context is generous
+rather than marginal — the headroom above 13k is for the agent's own history
+and its tool outputs. `Qwen/Qwen3-8B-AWQ` at 32k is ~6 GB of weights with room
+to spare for KV cache on a 16 GB card, which on `gpu-preempt` is the whole
+a16/l4 pool. One hour of walltime, 4 cores and 24 G backfill into almost any
+gap:
+
+```bash
+./run.sh demo                          # rifampicin, 4 isolates, effort low
+DEMO_DRUGS="rifampicin isoniazid" DEMO_LIMIT=8 ./run.sh demo
+```
+
+Nothing structural changes. Same cohort join, same variant naming and WHO panel
+filtering, same three mechanical trace checks, same monitoring timelines, same
+`results/<run-id>/` with its `SUMMARY.md`. What changes is what the numbers in
+it are worth, and that is worth saying out loud when showing it: the tool
+retriever means A1 sees a subset of its tools, so a retrieval run can miss one
+the full catalogue would have offered; an 8B calls tools less reliably than the
+32B, so expect more `unknown` verdicts and more retried replies; and four
+isolates on one drug is an illustration, not a sample size.
+
+The two knobs are independent of the demo job, so a run that is slow rather
+than queued has its own answer — keep the 32B and just cut the work:
+
+```bash
+TOOLS=1 MAX_MODEL_LEN=24576 DRUGS=rifampicin LIMIT=4 EFFORT=low ./run.sh quick
+```
+
+### No cluster at all: the laptop path
+
+Every mode also runs against Ollama, biomni's other local backend, which on an
+Apple-silicon laptop needs no GPU allocation and no queue:
+
+```bash
+ollama pull qwen3:8b
+OLLAMA_CONTEXT_LENGTH=32768 ollama serve      # the default 4k is far too small
+
+uv run cli.py papers --source Ollama --model qwen3:8b --tools --batch-size 1
+uv run cli.py --search "papers like <url>" --source Ollama --model qwen3:8b --tools
+```
+
+Screening and retrieval work as they are. Resistance prediction needs the VCFs
+locally, since they live in Unity project space, so bring down the handful the
+run will actually touch:
+
+`scripts/vcf_paths.py` prints exactly the paths a given run will read —
+`cohort.dataset()` is deterministic in drug, limit, balance and seed, so the
+same arguments that will run the prediction select the files to bring down:
+
+```bash
+uv run scripts/vcf_paths.py rifampicin --limit 4 --balance > vcfs.txt
+rsync -av --no-relative --files-from=vcfs.txt unity.rc.umass.edu:/ ./vcfs/
+
+uv run cli.py --predict rifampicin --limit 4 --balance --vcf-root ./vcfs \
+    --source Ollama --model qwen3:8b --tools
+```
+
+`--no-relative` matters: `--vcf-root` looks for each VCF as
+`<root>/<filename>`, so the copy has to land them flat rather than rebuilding
+the cluster's directory tree under `./vcfs`. Four VCFs is a few MB.
+
+The cost is the traces. Ollama has no reasoning parser, so the thinking comes
+back inline in `<think>` tags and is split out here
+(`tb_search/reasoning.py`) rather than arriving as its own field — the same
+text, one parsing step less trustworthy. For a demo that is a footnote; for the
+trace analysis itself, use the vLLM path.
 
 `run_experiment.sh` is the layer underneath — the three stages themselves —
 and can still be run directly:

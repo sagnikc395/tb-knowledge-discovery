@@ -37,6 +37,12 @@ BASE_URL="${BASE_URL:-${VLLM_BASE_URL:-http://localhost:8000/v1}}"
 MODEL="${MODEL:-${VLLM_MODEL:-Qwen/Qwen3-32B-AWQ}}"
 PAPERS="${PAPERS:-papers}"
 GOLD="${GOLD:-eval/screening_gold.json}"
+# TOOLS=1 passes --tools, so A1 retrieves a relevant tool subset instead of
+# carrying the whole catalogue in its system prompt: ~11k tokens rather than
+# ~36k. That is what lets a run fit a context window a small card can hold.
+TOOLS="${TOOLS:-0}"
+# Documents per screening agent run. 1 for a tight context window.
+BATCH_SIZE="${BATCH_SIZE:-2}"
 
 # No server answering: on a login node that means the job has not been
 # submitted yet, so submit it. The job runs this same script with the server up.
@@ -158,6 +164,7 @@ stage() {
 }
 
 COMMON=(--base-url "${BASE_URL}" --model "${MODEL}" --source Custom)
+[ "${TOOLS}" = "1" ] && COMMON+=(--tools) || true
 
 # 1. The cohort join: no LLM calls, so it fails fast if the data is not here.
 stage "cohort" "cohort.log" \
@@ -165,8 +172,8 @@ stage "cohort" "cohort.log" \
 
 # 2. Resistance prediction, one run per drug.
 PREDICT_FLAGS=(--limit "${LIMIT}" --seed "${SEED}" --reasoning-effort "${EFFORT}")
-[ "${BALANCE}" = "1" ] && PREDICT_FLAGS+=(--balance)
-[ -n "${VCF_ROOT:-}" ] && PREDICT_FLAGS+=(--vcf-root "${VCF_ROOT}")
+[ "${BALANCE}" = "1" ] && PREDICT_FLAGS+=(--balance) || true
+[ -n "${VCF_ROOT:-}" ] && PREDICT_FLAGS+=(--vcf-root "${VCF_ROOT}") || true
 
 for drug in ${DRUGS}; do
     stage "predict ${drug}" "predict-${drug}.log" \
@@ -176,8 +183,8 @@ done
 
 # 3. Literature screening, scored against the hand labels when they are there.
 if [ -d "${PAPERS}" ]; then
-    SCREEN_FLAGS=()
-    [ -f "${GOLD}" ] && SCREEN_FLAGS+=(--gold "${GOLD}")
+    SCREEN_FLAGS=(--batch-size "${BATCH_SIZE}")
+    [ -f "${GOLD}" ] && SCREEN_FLAGS+=(--gold "${GOLD}") || true
     stage "screening" "screening.log" \
         uv run cli.py "${PAPERS}" "${SCREEN_FLAGS[@]}" "${COMMON[@]}" \
         -o "${RUN_DIR}/tb_verdicts.json"

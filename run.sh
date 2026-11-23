@@ -2,6 +2,7 @@
 # One command, start to finish: submit the job, wait for it, show what it is
 # doing, and print where the results landed.
 #
+#   ./run.sh demo               # smallest end-to-end run: 16 GB card, ~1h cap
 #   ./run.sh                    # the quick job: one drug, 8 isolates, ~2h cap
 #   ./run.sh full               # the full four-drug run on an A100
 #
@@ -15,6 +16,7 @@
 #
 #   DRUGS="rifampicin isoniazid" LIMIT=20 ./run.sh full
 #   QUICK_LIMIT=4 ./run.sh                      # smaller quick run
+#   DEMO_LIMIT=8 ./run.sh demo                  # bigger demo run
 #   SBATCH_ARGS="--partition=gpu-preempt-highvram" ./run.sh
 #
 # Off the cluster, with a server already up, it runs the pipeline here instead
@@ -30,6 +32,7 @@ POLL="${POLL:-20}"
 ATTACH_JOB=""
 
 case "${MODE}" in
+demo)  SCRIPT="scripts/run_unity_demo.sbatch";  PREFIX="tb-demo"  ;;
 quick) SCRIPT="scripts/run_unity_quick.sbatch"; PREFIX="tb-quick" ;;
 full)  SCRIPT="scripts/run_unity_a100.sbatch";  PREFIX="tb-a100"  ;;
 # Re-attach to a job that is already in the queue, which is what Ctrl-C tells
@@ -40,7 +43,7 @@ full)  SCRIPT="scripts/run_unity_a100.sbatch";  PREFIX="tb-a100"  ;;
     [ -n "${ATTACH_JOB}" ] || { echo "No job to attach to." >&2; exit 1; }
     SCRIPT=""; PREFIX=""
     ;;
-*)     echo "usage: ./run.sh [quick|full|--attach [jobid]]" >&2; exit 2 ;;
+*)     echo "usage: ./run.sh [demo|quick|full|--attach [jobid]]" >&2; exit 2 ;;
 esac
 
 mkdir -p logs results
@@ -72,7 +75,8 @@ fi
 if [ -n "${ATTACH_JOB}" ]; then
     JOB="${ATTACH_JOB}"
     LOG=""
-    for candidate in "logs/tb-quick-${JOB}.out" "logs/tb-a100-${JOB}.out"; do
+    for candidate in "logs/tb-demo-${JOB}.out" "logs/tb-quick-${JOB}.out" \
+                     "logs/tb-a100-${JOB}.out"; do
         [ -f "${candidate}" ] && LOG="${candidate}" && break
     done
     # A job still pending has written no log yet; guess by the job's name so
