@@ -1,0 +1,17 @@
+{
+  "run_id": "demo-2149968",
+  "started_at": "2026-11-23T06:19:28",
+  "model": "Qwen/Qwen3-8B-AWQ",
+  "base_url": "http://127.0.0.1:8000/v1",
+  "reasoning_effort": "low",
+  "drugs": [
+    "rifampicin"
+  ],
+  "isolates_per_drug": 4,
+  "balanced": true,
+  "seed": 0,
+  "host": "gpu048",
+  "slurm_job_id": "2149968",
+  "git_commit": "28275d546d1369bb266733fb39ff7519ee191ddc",
+  "git_dirty": true
+}

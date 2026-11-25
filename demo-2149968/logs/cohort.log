@@ -1,0 +1,55 @@
+warning: `VIRTUAL_ENV=/home/sagnikchatte_umass_edu/vllm-venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+Downloading tiktoken (1.1MiB)
+Downloading tooluniverse (1.2MiB)
+Downloading ruff (10.1MiB)
+Downloading cryptography (4.5MiB)
+Downloading openai (2.3MiB)
+Downloading pandas (11.4MiB)
+Downloading zstandard (5.3MiB)
+Downloading beartype (1.3MiB)
+Downloading numpy (15.9MiB)
+Downloading pydantic-core (2.0MiB)
+Downloading pygments (1.2MiB)
+ Downloaded tooluniverse
+ Downloaded tiktoken
+ Downloaded pydantic-core
+ Downloaded zstandard
+ Downloaded cryptography
+ Downloaded pygments
+ Downloaded beartype
+ Downloaded ruff
+ Downloaded numpy
+ Downloaded pandas
+ Downloaded openai
+warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+         If the cache and target directories are on different filesystems, hardlinking may not be supported.
+         If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.
+Installed 116 packages in 1m 49s
+17942 isolate(s) with a VCF; 4228 table row(s) had none.
+
+  drug                            R      S   total
+  rifampicin                   4869  12713   17582
+  isoniazid                    5825  11611   17436
+  ethambutol                   2945  12166   15111
+  pyrazinamide                 2131  10773   12904
+  streptomycin                 2416   5266    7682
+  capreomycin                   675   3179    3854
+  amikacin                      707   2998    3705
+  kanamycin                     703   2873    3576
+  ofloxacin                     824   2590    3414
+  moxifloxacin                  388   2480    2868
+  ethionamide                   690   1463    2153
+  rifabutin                     566    535    1101
+  para_aminosalicylic_acid       77    757     834
+  prothionamide                 184    381     565
+  cycloserine                   100    412     512
+  ciprofloxacin                 106    332     438
+  levofloxacin                   76    193     269
+  amoxicillin                    16    215     231
+  clarithromycin                 19     16      35
+  nicotinamide                   28      4      32
+  clofazimine                    16      1      17
+  gatifloxacin                    8      0       8
+  amoxicillin_clavulanate         3      0       3
+
+Saved to /project/pi_annagreen_umass_edu/sagnik/tb-agentic-search/results/demo-2149968/tb_cohort.json

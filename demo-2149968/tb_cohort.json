@@ -1,0 +1,146 @@
+{
+  "generated_at": "2026-11-23T06:21:42",
+  "isolates": 17942,
+  "unmatched_rows": 4228,
+  "unmatched_vcfs": 0,
+  "drugs": [
+    {
+      "drug": "rifampicin",
+      "resistant": 4869,
+      "susceptible": 12713,
+      "total": 17582
+    },
+    {
+      "drug": "isoniazid",
+      "resistant": 5825,
+      "susceptible": 11611,
+      "total": 17436
+    },
+    {
+      "drug": "ethambutol",
+      "resistant": 2945,
+      "susceptible": 12166,
+      "total": 15111
+    },
+    {
+      "drug": "pyrazinamide",
+      "resistant": 2131,
+      "susceptible": 10773,
+      "total": 12904
+    },
+    {
+      "drug": "streptomycin",
+      "resistant": 2416,
+      "susceptible": 5266,
+      "total": 7682
+    },
+    {
+      "drug": "capreomycin",
+      "resistant": 675,
+      "susceptible": 3179,
+      "total": 3854
+    },
+    {
+      "drug": "amikacin",
+      "resistant": 707,
+      "susceptible": 2998,
+      "total": 3705
+    },
+    {
+      "drug": "kanamycin",
+      "resistant": 703,
+      "susceptible": 2873,
+      "total": 3576
+    },
+    {
+      "drug": "ofloxacin",
+      "resistant": 824,
+      "susceptible": 2590,
+      "total": 3414
+    },
+    {
+      "drug": "moxifloxacin",
+      "resistant": 388,
+      "susceptible": 2480,
+      "total": 2868
+    },
+    {
+      "drug": "ethionamide",
+      "resistant": 690,
+      "susceptible": 1463,
+      "total": 2153
+    },
+    {
+      "drug": "rifabutin",
+      "resistant": 566,
+      "susceptible": 535,
+      "total": 1101
+    },
+    {
+      "drug": "para_aminosalicylic_acid",
+      "resistant": 77,
+      "susceptible": 757,
+      "total": 834
+    },
+    {
+      "drug": "prothionamide",
+      "resistant": 184,
+      "susceptible": 381,
+      "total": 565
+    },
+    {
+      "drug": "cycloserine",
+      "resistant": 100,
+      "susceptible": 412,
+      "total": 512
+    },
+    {
+      "drug": "ciprofloxacin",
+      "resistant": 106,
+      "susceptible": 332,
+      "total": 438
+    },
+    {
+      "drug": "levofloxacin",
+      "resistant": 76,
+      "susceptible": 193,
+      "total": 269
+    },
+    {
+      "drug": "amoxicillin",
+      "resistant": 16,
+      "susceptible": 215,
+      "total": 231
+    },
+    {
+      "drug": "clarithromycin",
+      "resistant": 19,
+      "susceptible": 16,
+      "total": 35
+    },
+    {
+      "drug": "nicotinamide",
+      "resistant": 28,
+      "susceptible": 4,
+      "total": 32
+    },
+    {
+      "drug": "clofazimine",
+      "resistant": 16,
+      "susceptible": 1,
+      "total": 17
+    },
+    {
+      "drug": "gatifloxacin",
+      "resistant": 8,
+      "susceptible": 0,
+      "total": 8
+    },
+    {
+      "drug": "amoxicillin_clavulanate",
+      "resistant": 3,
+      "susceptible": 0,
+      "total": 3
+    }
+  ]
+}

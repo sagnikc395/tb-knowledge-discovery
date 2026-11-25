@@ -1,0 +1,67 @@
+{
+  "generated_at": "2026-11-23T06:59:24",
+  "model": "Custom/Qwen/Qwen3-8B-AWQ",
+  "mode": "agent",
+  "input": "papers",
+  "summary": {
+    "related": 1,
+    "not_related": 2,
+    "unknown": 3
+  },
+  "results": [
+    {
+      "file": "2026.01.16.696667v3.full.pdf",
+      "path": "papers/2026.01.16.696667v3.full.pdf",
+      "tb_related": null,
+      "confidence": null,
+      "evidence": "",
+      "evidence_verified": null,
+      "reason": "agent verdict could not be parsed"
+    },
+    {
+      "file": "2026.01.30.702134v1.full.pdf",
+      "path": "papers/2026.01.30.702134v1.full.pdf",
+      "tb_related": null,
+      "confidence": null,
+      "evidence": "",
+      "evidence_verified": null,
+      "reason": "agent verdict could not be parsed"
+    },
+    {
+      "file": "2026.05.12.724604v1.full.pdf",
+      "path": "papers/2026.05.12.724604v1.full.pdf",
+      "tb_related": null,
+      "confidence": null,
+      "evidence": "",
+      "evidence_verified": null,
+      "reason": "agent verdict could not be parsed"
+    },
+    {
+      "file": "2405.17631v3.pdf",
+      "path": "papers/2405.17631v3.pdf",
+      "tb_related": false,
+      "confidence": "low",
+      "evidence": "",
+      "evidence_verified": null,
+      "reason": "Document discusses AI agent for genetic perturbation experiments, no mention of TB or M. tuberculosis"
+    },
+    {
+      "file": "2606.12736v1.pdf",
+      "path": "papers/2606.12736v1.pdf",
+      "tb_related": false,
+      "confidence": "low",
+      "evidence": "",
+      "evidence_verified": null,
+      "reason": "Excerpt discusses AI agents for scientific research without mentioning TB or M. tuberculosis"
+    },
+    {
+      "file": "nihms-2147410.pdf",
+      "path": "papers/nihms-2147410.pdf",
+      "tb_related": true,
+      "confidence": "high",
+      "evidence": "The World Health Organization (WHO) 2023 Mutation Catalogue for Mycobacterium tuberculosis is a crucial knowledgebase and tool for clinical interpretation of mutations associated with drug- resistant TB.",
+      "evidence_verified": true,
+      "reason": "The study focuses on AI tools for analyzing TB mutation data and drug resistance."
+    }
+  ]
+}
