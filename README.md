@@ -1,273 +1,128 @@
 # tb-knowledge-discovery
 
-Three capabilities, each one a run of the
-[Biomni](https://github.com/snap-stanford/Biomni) A1 agent against a model you
-serve yourself — vLLM on the cluster, or Ollama locally (see
-[Serving the model](#serving-the-model-vllm-on-unity)). No hosted API, no key.
-
-- **Retrieval** (`--search`) — give it a request such as "find me relevant papers
-  like this paper <paper-url>". A1 resolves the seed paper and searches for
-  related work with its own retrieval tools (`query_pubmed`, `query_arxiv`,
-  `query_scholar`, `search_google`, `extract_url_content`), and the paper list
-  is read out of its reply.
-- **Screening** — hand it a folder of documents (PDF or plain text) and it
-  returns a verdict per document: `tb_related`, a confidence, a reason, and an
-  `evidence` quote that is checked against the excerpt the agent was shown
-  (`evidence_verified`).
-- **Resistance prediction from VCFs** (`--cohort`, `--predict`) — ingest the
-  BIG-TB isolate VCFs, and for a given drug predict `resistant` /
-  `not_resistant` / `unknown` with a reasoning trace. Calls are scored against
-  the phenotypic DST labels, and each trace is graded against the variants the
-  model was actually shown.
-
-Serving the model ourselves is what makes the reasoning traces usable: a vLLM
-server started with a reasoning parser returns the model's thinking separated
-from its answer, and every prediction stores that trace verbatim beside the
-variants it was shown. It is also what gives A1 a tool-calling backend that
-costs GPU hours rather than per-token billing.
-
-A1's system prompt is ~35k tokens and rides on every step of every run, so the
-server has to be started with a context window well past that
-(`--max-model-len 65536`) and with tool calling enabled. That is the one hard
-requirement this design buys: there is no small-call fallback path.
+The pipeline uses Biomni A1 to retrieve papers, screen documents for TB
+relevance, and evaluate drug resistance predictions on BIG-TB VCFs against
+phenotypic drug susceptibility labels. It runs against a self-hosted model
+served by vLLM or Ollama. [Biomni](https://github.com/snap-stanford/Biomni)
 
 ## Setup
 
+Run these commands from the repository root. On Unity, load `uv` first.
+
 ```bash
+module load uv  # Unity only
 uv sync
-cp .env.example .env   # optional: everything in it has a default
 ```
 
-Every mode but `--cohort` needs a model server to call, and nothing in `.env`
-is required to reach one: the defaults are `Qwen/Qwen3-32B-AWQ` at
-`http://localhost:8000/v1`, so `--base-url` (or `VLLM_BASE_URL`) is all that
-changes when the server lives on a compute node.
+For direct `cli.py` commands, copy `.env.example` to `.env` if you want to
+save model settings. The experiment runner uses its profile defaults and
+command-line flags.
 
-## Running the whole experiment
+## Run an experiment
 
-From a Unity login node:
+`run.sh` runs the cohort join, predicts resistance for each requested drug, and
+screens the papers against the labels in `eval/screening_gold.json`. It submits
+and follows a Slurm job if `sbatch` is available. Use `--slurm` or `--local`
+to select the execution mode explicitly.
 
 ```bash
-module load uv      # run.sh's preflight fails without uv on PATH
-uv sync             # once
-./run.sh full       # the full four-drug run on an A100
-./run.sh            # or the quick job: one drug, 8 isolates, 2h cap
-./run.sh demo       # or the smallest end-to-end run: a 16 GB card, 1h cap
+./run.sh --profile demo
+./run.sh --profile quick          # default profile
+./run.sh --profile full
+./run.sh --help
 ```
 
-That is the whole happy path — submit, serve the model, run the three stages,
-package the results. No `.env` is needed; the job script passes `BASE_URL` and
-`MODEL` to the pipeline itself.
+| Profile | Unity allocation | Model and context | Sample | Prediction effort |
+| --- | --- | --- | --- | --- |
+| `demo` | 16+ GB GPU, 1 h | Qwen3-8B-AWQ, 32,768 tokens | 4 rifampicin isolates | low |
+| `quick` | 23+ GB GPU, 2 h | Qwen3-14B-AWQ, 40,960 tokens | 8 rifampicin isolates | medium |
+| `full` | A100, 8 h | Qwen3-32B-AWQ, 65,536 tokens | 20 isolates per drug for rifampicin, isoniazid, ethambutol, and pyrazinamide | high |
 
-Three things it does not do for you.
+All profiles sample equal resistant and susceptible counts by default. A drug
+with few labelled isolates in either class can yield fewer than `--limit`.
+The demo uses agent tool selection and one document per screening batch. Use
+`--tools` and `--batch-size` to adjust these settings in any profile.
 
-**The first run pays for the venv and the weights, inside the job.**
-`run_unity_a100.sbatch` builds `~/vllm-venv` with `pip install vllm autoawq`
-(~10 min), and then vLLM pulls `Qwen/Qwen3-32B-AWQ` — ~18 GB — into the default
-HuggingFace cache under `$HOME`, which is both slow and more than a Unity home
-quota wants to hold. Point it at work or project space first, once:
+On Unity, the first job creates `~/vllm-venv` and downloads the model weights.
+Use project or work storage for the model cache and allow time for first-run
+setup. The VCFs must also be readable from the compute node. If they have
+moved, pass the directory containing the VCF files with `--vcf-root`.
 
 ```bash
 export HF_HOME=/work/pi_annagreen_umass_edu/$USER/hf
+
+./run.sh --slurm --profile full \
+    --drugs "rifampicin isoniazid" --limit 40 --seed 7 \
+    --vcf-root /path/to/vcfs --run-id two-drug-seed7 \
+    --sbatch-arg --time=12:00:00
 ```
 
-Doing that download in a throwaway `./run.sh` means the full job starts serving
-in a couple of minutes instead of spending half an hour of its walltime on
-setup.
-
-**The VCFs have to be readable from the node.** `big_tb_file_paths.txt` records
-them under `/project/pi_annagreen_umass_edu/anna/BIG-TB_v2/isolates/`, so the
-run needs read access to that project space and those paths need to still be
-valid; `VCF_ROOT=/path/to/vcfs ./run.sh full` if they have moved. The cohort
-join is the cheap way to check, because no model is involved:
+Pass `--submit-only` to return after submission. Ctrl-C detaches from a job you
+are following. Use `--attach` to reconnect, or `scancel JOB_ID` to cancel it.
 
 ```bash
-uv run cli.py --cohort -o /tmp/cohort.json
+./run.sh --attach 1234567
+tail -f logs/tb-1234567.out
+./run.sh --status results/two-drug-seed7
 ```
 
-**`./run.sh full` is not the full cohort.** It is four drugs at `LIMIT=20`
-balanced isolates — 80 predictions — not the 17,942 isolates in the path list.
-For a real sample size, say so:
+### Use an existing model server
 
 ```bash
-DRUGS="rifampicin isoniazid ethambutol pyrazinamide streptomycin amikacin" \
-LIMIT=100 ./run.sh full
+./run.sh --local --profile full --base-url http://localhost:8000/v1 \
+    --model Qwen/Qwen3-32B-AWQ --vcf-root ./vcfs
 ```
 
-and that will not fit the job's 8 h walltime. Each prediction is a multi-step
-A1 run carrying a ~35k-token system prompt on every step, so take the
-per-prediction time from a quick run's log before scaling, then either raise the
-walltime (`SBATCH_ARGS="--time=24:00:00"`) or split the drugs across separate
-jobs with their own `RUN_ID`. Coverage limits the drug list too: rifampicin and
-isoniazid have ~17.5k labelled isolates, but the rarely tested drugs have a few
-dozen, so a large `--limit` with `--balance` quietly returns fewer for those.
-
-Then wait. `run.sh` submits the job, prints why it is still pending while it
-is, follows the log once it starts, and ends by printing the run's summary and
-the folder and tarball to send on. Ctrl-C detaches without cancelling the job;
-`./run.sh --attach <jobid>` picks it back up, and `scancel <jobid>` is the way
-to actually stop it. It checks for `uv`, the job script and the resistance
-table before submitting, so the usual reasons a job dies ten minutes in show
-up on your terminal instead of at the bottom of a log.
-
-Everything below still works and `run.sh` passes it through:
+For Ollama, start the server with `OLLAMA_CONTEXT_LENGTH=32768 ollama serve`
+and run `ollama pull qwen3:8b`. Then run the demo against it.
 
 ```bash
-DRUGS="rifampicin isoniazid" LIMIT=20 ./run.sh full
-QUICK_LIMIT=4 ./run.sh
+./run.sh --local --profile demo --source Ollama --model qwen3:8b --vcf-root ./vcfs
 ```
 
-### Showing the pipeline without waiting for a big card
-
-`./run.sh demo` is the tier below `quick`, for when the thing to demonstrate is
-that the pipeline runs end to end rather than what the numbers are.
-
-The queue, not the GPU hours, is what makes a run take an afternoon, and the
-number that decides the queue is the context window. A1 carries all 218 of its
-tools in its system prompt — 156k characters, ~39k tokens, on every step — so
-the server needs 40k of context, so it needs a card of at least 23 GB, so the
-job waits for one of a handful of Ampere nodes. `quick` relaxed the partition,
-the walltime and the card but could not relax that.
-
-The demo job breaks it. `TOOLS=1` passes `--tools`, which switches on biomni's
-prompt-based tool retriever: one selection call per run carrying the tool names
-and descriptions, and then a system prompt holding only the tools it picked.
-Measured on this repo's catalogue:
-
-| | chars | ~tokens |
-| --- | --- | --- |
-| full system prompt, every step | 156,008 | 39,000 |
-| `--tools`: the one selection call | 47,000 | 12,000 |
-| `--tools`: system prompt per step after it | 17,903 | 4,500 |
-
-So the peak prompt is ~13k rather than 39k, and 32k of context is generous
-rather than marginal — the headroom above 13k is for the agent's own history
-and its tool outputs. `Qwen/Qwen3-8B-AWQ` at 32k is ~6 GB of weights with room
-to spare for KV cache on a 16 GB card, which on `gpu-preempt` is the whole
-a16/l4 pool. One hour of walltime, 4 cores and 24 G backfill into almost any
-gap:
+For local resistance prediction, select the files with the same drug, limit,
+balance and seed as the experiment. `--vcf-root` expects a flat directory of VCF
+files.
 
 ```bash
-./run.sh demo                          # rifampicin, 4 isolates, effort low
-DEMO_DRUGS="rifampicin isoniazid" DEMO_LIMIT=8 ./run.sh demo
-```
-
-Nothing structural changes. Same cohort join, same variant naming and WHO panel
-filtering, same three mechanical trace checks, same monitoring timelines, same
-`results/<run-id>/` with its `SUMMARY.md`. What changes is what the numbers in
-it are worth, and that is worth saying out loud when showing it: the tool
-retriever means A1 sees a subset of its tools, so a retrieval run can miss one
-the full catalogue would have offered; an 8B calls tools less reliably than the
-32B, so expect more `unknown` verdicts and more retried replies; and four
-isolates on one drug is an illustration, not a sample size.
-
-The two knobs are independent of the demo job, so a run that is slow rather
-than queued has its own answer — keep the 32B and just cut the work:
-
-```bash
-TOOLS=1 MAX_MODEL_LEN=24576 DRUGS=rifampicin LIMIT=4 EFFORT=low ./run.sh quick
-```
-
-### No cluster at all: the laptop path
-
-Every mode also runs against Ollama, biomni's other local backend, which on an
-Apple-silicon laptop needs no GPU allocation and no queue:
-
-```bash
-ollama pull qwen3:8b
-OLLAMA_CONTEXT_LENGTH=32768 ollama serve      # the default 4k is far too small
-
-uv run cli.py papers --source Ollama --model qwen3:8b --tools --batch-size 1
-uv run cli.py --search "papers like <url>" --source Ollama --model qwen3:8b --tools
-```
-
-Screening and retrieval work as they are. Resistance prediction needs the VCFs
-locally, since they live in Unity project space, so bring down the handful the
-run will actually touch:
-
-`scripts/vcf_paths.py` prints exactly the paths a given run will read —
-`cohort.dataset()` is deterministic in drug, limit, balance and seed, so the
-same arguments that will run the prediction select the files to bring down:
-
-```bash
-uv run scripts/vcf_paths.py rifampicin --limit 4 --balance > vcfs.txt
+uv run cli.py --vcf-paths rifampicin --limit 4 --balance --seed 0 > vcfs.txt
 rsync -av --no-relative --files-from=vcfs.txt unity.rc.umass.edu:/ ./vcfs/
-
-uv run cli.py --predict rifampicin --limit 4 --balance --vcf-root ./vcfs \
-    --source Ollama --model qwen3:8b --tools
 ```
 
-`--no-relative` matters: `--vcf-root` looks for each VCF as
-`<root>/<filename>`, so the copy has to land them flat rather than rebuilding
-the cluster's directory tree under `./vcfs`. Four VCFs is a few MB.
+### Run a single stage or serve a model
 
-The cost is the traces. Ollama has no reasoning parser, so the thinking comes
-back inline in `<think>` tags and is split out here
-(`tb_search/reasoning.py`) rather than arriving as its own field — the same
-text, one parsing step less trustworthy. For a demo that is a footnote; for the
-trace analysis itself, use the vLLM path.
-
-`run_experiment.sh` is the layer underneath — the three stages themselves —
-and can still be run directly:
+Use `--cli` to pass arguments straight to `cli.py` after the runner's server
+settings. For model-free commands such as `--cohort` and `--vcf-paths`, you can
+also call `cli.py` directly.
 
 ```bash
-./run_experiment.sh
+./run.sh --local --cli --cohort -o /tmp/cohort.json
+./run.sh --slurm --profile demo --cli --search "TB literature related to <paper URL>"
+./run.sh --slurm --profile full --cli --predict rifampicin --limit 40 --balance
+./run.sh --slurm --profile full --submit-only --serve-only
 ```
 
-From a Unity login node that submits `scripts/run_unity_a100.sbatch`, which
-takes an A100, serves the model, and runs this same script against it. With a
-server already up it runs here instead. Three stages: the cohort join (no model
-involved, so it fails fast if the data is unreadable), resistance prediction
-per drug, and literature screening against the hand labels in `eval/`. A stage
-that fails is recorded and the rest still run.
+A server-only job prints its URL in the Slurm log and serves until the job
+ends. For a client off-cluster, forward the job's port over SSH and use the
+forwarded address as `--base-url`.
 
-Everything lands in `results/<run-id>/`, which is the folder to hand to someone
-else — raw JSON exactly as the pipeline wrote it, every stage's full log, the
-model and commit and seed the numbers came from, and a `SUMMARY.md` that reads
-first. `scripts/collect_results.sh` is what writes that summary, the
-`metrics.csv` beside it and a `.tar.gz` of the folder; `run_experiment.sh`
-calls it at the end, and you can re-run it on any run folder:
+### Find and package results
+
+An experiment writes to `results/<run-id>/`. The directory holds the stage
+JSON, stage logs, timing and exit records, run metadata, a `SUMMARY.md`, and
+`metrics.csv` when predictions are available. GPU and vLLM timelines are
+recorded when those services are available. The runner also creates
+`results/<run-id>.tar.gz` and updates the run's row in `results/runs.csv`.
+
+A failed stage is recorded and the remaining stages still run. The runner
+packages the available results before returning a nonzero exit status.
+To rebuild a report after a run has finished or been interrupted, use
+`--collect`. With no directory, it selects the most recently modified run
+directory under `results/`.
 
 ```bash
-scripts/collect_results.sh                    # the newest run
-scripts/collect_results.sh results/<run-id>   # a particular one
+./run.sh --collect results/two-drug-seed7
 ```
-
-Every run is also sampled while it runs. `scripts/monitor_run.sh` is started
-and stopped by `run_experiment.sh`, and writes two timelines into the run's
-`logs/`: `gpu_timeline.csv` (utilisation, memory, power, temperature) and
-`server_timeline.csv` (vLLM's requests running and queued, KV-cache occupancy
-and generation tokens per second). `logs/stages.jsonl` records each stage's
-exit code, start time and duration beside them. These answer the question the
-stage logs cannot — whether a slow run was slow because the card was saturated
-or because it sat idle waiting on the agent — and `SUMMARY.md` carries the
-headline figures under **Run monitoring**.
-
-`results/runs.csv` is one row per run across every run that has finished,
-successful or not: model, effort, seed, commit, which stages failed, total
-time, mean GPU utilisation and mean tokens per second. It is rewritten by
-run id, so re-running `collect_results.sh` on a folder corrects that run's row
-rather than adding another.
-
-To watch a Slurm job, including the live timelines and stage durations:
-
-```bash
-scripts/watch_job.sh              # the newest job of yours in the queue
-scripts/watch_job.sh 1234567      # a particular one
-scripts/monitor_run.sh status results/<run-id>    # just the last samples
-```
-
-The knobs are environment variables, so the defaults stay out of the command:
-
-```bash
-DRUGS="rifampicin isoniazid" LIMIT=40 EFFORT=high ./run_experiment.sh
-VCF_ROOT=/project/.../vcfs ./run_experiment.sh    # VCFs not where the cohort says
-```
-
-`DRUGS` (default: rifampicin, isoniazid, ethambutol, pyrazinamide), `LIMIT`
-isolates per drug, `BALANCE=1` for equal R and S, `SEED` so a run repeats,
-`EFFORT`, `RUN_ID` to name the folder, and `BASE_URL`/`MODEL` to point at a
-server yourself.
 
 ## Resistance prediction from VCFs
 
@@ -331,140 +186,31 @@ problem) and ends with accuracy, sensitivity, specificity, PPV/NPV, the
 confusion matrix and the trace rates. `tb_resistance_<drug>.json` holds every
 prediction with its variant list, reasoning and trace grade.
 
-## Serving the model (vLLM on Unity)
+## Model serving
 
-The model runs on our own hardware, which is what puts the model choice, the
-reasoning settings and the response format under our control — and lets the
-server hand back the model's thinking as its own field instead of leaving it
-mixed into the answer.
+The experiment runner starts vLLM with the Qwen3 reasoning parser and Hermes
+tool parser. The reasoning parser supplies the per-request trace as its own
+response field. The context window must fit A1's tool catalogue and the agent's
+history. With `--tools`, A1 selects a smaller set of tools for each task.
 
-Biomni has two backends that serve a model locally, and both drive the A1
-agent:
-
-| `--source` | what it is | reasoning traces |
+| Backend | Setup | Trace format |
 | --- | --- | --- |
-| `Custom` (default) | any OpenAI-compatible server, i.e. `vllm serve` | separated into `reasoning`, captured per prediction |
-| `Ollama` | a pulled Ollama model on its own port | only what the model leaves in `<think>` tags |
+| `Custom` | OpenAI-compatible endpoint, such as vLLM | Separate reasoning field when the server supplies one |
+| `Ollama` | Local Ollama server with the model pulled | Inline `<think>` tags when the model returns them |
 
-`Custom` is the one to use on the cluster. The default model is
-`Qwen/Qwen3-32B-AWQ`: vLLM serves it with a `qwen3` reasoning parser *and* with
-tool calling, and biomni reaches it as an ordinary OpenAI-compatible model,
-which is what A1 needs to call its tools — all three at once, which not every
-model manages.
-
-`scripts/run_unity_a100.sbatch` is the whole cluster side: one Slurm job that
-takes an A100, serves the model, waits for it to come up, and then runs the
-pipeline against it. Everything after the script name goes to `cli.py`:
-
-```bash
-sbatch scripts/run_unity_a100.sbatch --predict rifampicin --limit 40 --balance
-sbatch scripts/run_unity_a100.sbatch --search "fluoroquinolone resistance"
-sbatch scripts/run_unity_a100.sbatch        # no args: serve only, and hold
-tail -f logs/tb-a100-<jobid>.out            # prints the --base-url to use
-```
-
-With no arguments it holds the server for the rest of the walltime, which is
-the mode to use when the client is somewhere else — a tunnel from a laptop, or
-an interactive session. With arguments it kills the server as soon as the run
-finishes, so the card is not held for nothing.
-
-The model is quantized because of the card. Unity's `a100` nodes are compute
-capability 8.0, which has no native FP8, so 4-bit AWQ is the quantization that
-runs there: `Qwen/Qwen3-32B-AWQ` is ~18 GB of weights, leaving the rest of a
-40 GB card (and most of an 80 GB one) to the KV cache at the 64k context A1
-needs — one GPU is enough for every mode. vLLM reads the AWQ config out of the
-checkpoint and picks the `awq_marlin` kernel itself, so there is no
-`--quantization` flag to pass. `MODEL=Qwen/Qwen3-8B` serves the bf16 8B on the
-same job instead; same family, so the parsers are unchanged and only the served
-id passed to the client changes.
-
-The job asks for `--partition=gpu-highvram --gres=gpu:a100:1`. Both halves
-matter: Unity's default partition is `cpu`, which refuses a `--gres` at all, and
-its plain `gpu` partition holds titan_x/v100/1080_ti/2080_ti/m40/l4/a16 but no
-A100 — so `--partition=gpu --constraint=a100` is unsatisfiable. `sinfo -o '%P %G
-%f' | grep a100` is the list that settles which partitions have them:
-`gpu-highvram` (non-preemptible, the default here), `gpu-preempt-highvram`,
-`superpod-a100`, and the PI partitions `cbio-gpu`, `ece-gpu`, `umd-cscdr-gpu`.
-To aim the job elsewhere, pass `SBATCH_ARGS` instead of editing the file; it
-overrides the job's own directives:
-
-```bash
-SBATCH_ARGS="--partition=gpu-preempt-highvram" ./run_experiment.sh
-SBATCH_ARGS="--constraint=a100-80g" ./run_experiment.sh   # 80 GB cards only
-```
-
-A failed submission prints the GPU nodes the cluster actually offers, which is
-the list to choose from. Walltime and the venv holding vLLM are set at the top
-of the job file. It runs, in effect:
+For a manually started vLLM server, use the same settings as the full profile.
 
 ```bash
 vllm serve Qwen/Qwen3-32B-AWQ --port 8000 \
-    --gpu-memory-utilization 0.90 \
-    --reasoning-parser qwen3 \
-    --enable-auto-tool-choice --tool-call-parser hermes \
-    --max-model-len 65536
+    --gpu-memory-utilization 0.90 --max-model-len 65536 \
+    --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser hermes
 ```
 
-`--reasoning-parser` is what separates the thinking into the response's
-`reasoning` field ([vLLM
-docs](https://docs.vllm.ai/en/stable/features/reasoning_outputs/)); the parser
-name has to match the model family. `--enable-auto-tool-choice` is what lets
-the A1 agent do its tool calling against this server, and `--max-model-len` has
-to clear A1's ~35k-token system prompt for anything to work at all.
+Use `--max-model-len` and `--port` on `run.sh` to override the vLLM settings
+for a Slurm job. For scheduler overrides, repeat `--sbatch-arg` with one option
+per occurrence, such as `--sbatch-arg --partition=gpu-preempt-highvram`.
 
-Then point any mode at it. biomni runs here, in this process, and knows the
-inference engine only by URL:
-
-```bash
-# resistance prediction, with thinking captured per isolate
-uv run cli.py --predict rifampicin --limit 40 --balance \
-    --base-url http://gpu042:8000/v1 --model Qwen/Qwen3-32B-AWQ \
-    --reasoning-effort high
-
-# from a laptop, through a tunnel: ssh -N -L 8000:gpu042:8000 unity.rc.umass.edu
-uv run cli.py --predict isoniazid --base-url http://localhost:8000/v1 ...
-
-# a retrieval run against the same server
-uv run cli.py --search "papers like <url>" --base-url http://gpu042:8000/v1
-```
-
-`--base-url` is biomni's `Custom` source, which A1 takes too, so the agent's
-own tool calling runs against that same server; no API key is involved.
-Before anything else runs,
-the endpoint is pinged and its model list checked, so a job that has not come up
-yet — or a model id that is not the one being served — fails immediately
-instead of mid-run (`--source Ollama` is checked the same way, against
-`ollama`'s own list of pulled models).
-
-A local server has no rate limit, so there is nothing to wait out; a request
-that fails on a busy or restarting server is retried twice, while one that fails
-on context length is not, because it would fail again identically.
-
-`--reasoning-effort` goes out as the request's `reasoning_effort`, which vLLM
-maps onto the chat template's thinking switch. It is recorded in the output
-JSON, because traces are only comparable across runs at the same effort.
-
-**What ends up in the traces.** Each prediction carries two: `reasoning`, what
-the model wrote into its answer, and `reasoning_trace`, the thinking the server
-separated out. They can disagree, and the second is the one that shows how the
-call was actually reached, so it is what the biological-validity read-through
-works from. The run summary reports how many calls came with thinking attached
-and the median length; a model served without a reasoning parser yields empty
-traces and the summary says so.
-
-With `reasoning_content` being the field's older spelling, and langchain's
-`ChatOpenAI` dropping both as non-standard, `tb_search/screening.py` subclasses
-it to keep them — otherwise the traces never reach us at all.
-
-A1 makes that harder than a plain chat call does. Its `generate` step rebuilds
-every reply as a fresh `AIMessage`, so `additional_kwargs` — and the
-`reasoning` field with it — is gone by the time the step reaches the agent's
-graph state. So the subclass also appends each trace to a list that
-`build_agent` hands it, and `run_agent` reads that list back per run: the whole
-run's thinking, step by step, which with a tool loop in the middle is what the
-answer was actually reasoned from.
-
-## Usage
+## Direct CLI usage
 
 **Screening local documents**
 
@@ -722,7 +468,7 @@ real: a sweep over thousands of isolates pays it thousands of times, and
 fail, `retry_transient` retries a busy or restarting server twice, and a failure
 is reported per batch or per isolate instead of ending the run.
 
-## Flags
+## Direct CLI flags
 
 | flag | meaning |
 | --- | --- |
@@ -732,6 +478,8 @@ is reported per batch or per isolate instead of ending the run.
 | `--gold JSON` | `[screening]` Hand labels `{filename: true/false}`; prints accuracy |
 | `--cohort` | Join the resistance table to the listed VCFs; per-drug dataset sizes. Output: `tb_cohort.json` |
 | `--predict DRUG` | Predict resistance to DRUG from each isolate's VCF, with a checked trace. Output: `tb_resistance_<drug>.json` |
+| `--vcf-paths DRUG` | Print the selected sample's VCF paths without model calls |
+| `--relative-to DIR` | [`--vcf-paths`] Print paths relative to this directory |
 | `--vcf-root DIR` | `[--predict]` Where the VCFs actually live, replacing the recorded cluster path |
 | `--data-dir DIR` | `[--cohort]`, `[--predict]` Where the cohort files live (default `data/cleaned_vcf_paths`) |
 | `--limit N` | `[--predict]` Isolates to predict over (default 20) |
@@ -746,7 +494,7 @@ is reported per batch or per isolate instead of ending the run.
 | `--source` | Which biomni backend serves the model: `Custom` (any OpenAI-compatible server, i.e. vLLM) or `Ollama` (default: `$LLM_SOURCE` or `Custom`). Both drive A1; only `Custom` hands back separated traces |
 | `--batch-size` | `[screening]` Documents per agent run (default 2) |
 | `--max-chars` | Excerpt length per document (default 3000) |
-| `--tools` | Let A1 retrieve a relevant tool subset instead of carrying them all |
+| `--tools`, `--no-tools` | Enable or disable selection of relevant agent tools |
 | `--data-lake` | Let biomni pull its full data lake (tens of GB) |
 | `--temperature` | Sampling temperature (default 0.2) |
 | `--verbose` | `[--search]` Also print biomni's full step-by-step agent output |
@@ -754,17 +502,8 @@ is reported per batch or per isolate instead of ending the run.
 ## Layout
 
 ```
-run.sh             submit, wait, follow, summarise — the one to run
-run_experiment.sh  the three stages themselves; writes results/<run-id>/
-cli.py             CLI entry point
-scripts/
-  run_unity_a100.sbatch     one Slurm job: serve the quantized model on a Unity
-                            A100, then run the pipeline against it
-  run_unity_quick.sbatch    the same experiment on any Ampere-or-newer card
-                            with >=23 GB, sized to clear the queue faster
-  collect_results.sh        SUMMARY.md, metrics.csv and a tarball for a run folder
-  monitor_run.sh            samples the GPU and the vLLM server during a run
-  watch_job.sh              queue state, stage progress and timelines, refreshed
+run.sh             experiment runner for local servers and Slurm
+cli.py             individual pipeline commands
 tb_search/
   config.py        Settings loaded from .env / environment: which local backend, which model
   reasoning.py     reasoning effort, and pulling a reply's thinking out of it
@@ -775,6 +514,7 @@ tb_search/
   screening.py     A1 construction, one-run-per-prompt, and agent screening
   retrieval.py     one A1 agent run: query (+ seed paper URL) -> paper rows
   report.py        summary line + JSON output (verdicts, searches, predictions)
+  experiment_report.py  experiment summary, run ledger, and archive
   genome.py        H37Rv position -> gene, codon, promoter offset, protein change
   catalogue.py     WHO drug -> resistance gene panels, tier 1 and tier 2
   vcf.py           read a VCF into named, panel-filtered variants

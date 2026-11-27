@@ -1,2 +1,0 @@
-drug,isolates,answered,accuracy,sensitivity,specificity,ppv,npv,trace_valid,hallucinated_variants,thinking_captured,errors,confusion_true_resistant_called_resistant,confusion_true_resistant_called_susceptible,confusion_true_susceptible_called_resistant,confusion_true_susceptible_called_susceptible,file
-rifampicin,4,3,0.667,1.0,0.0,0.667,,1.0,0.0,1.0,0,2,0,1,0,tb_resistance_rifampicin.json

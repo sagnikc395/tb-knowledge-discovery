@@ -66,7 +66,7 @@ def provider_options(args) -> dict:
         "base_url": args.base_url,
         "reasoning_effort": args.reasoning_effort,
         "source": args.source,
-        "use_tool_retriever": args.tools or None,
+        "use_tool_retriever": args.tools,
         "load_data_lake": args.data_lake or None,
     }
 
@@ -144,6 +144,16 @@ def build_parser() -> argparse.ArgumentParser:
         "tb_resistance_<drug>.json.",
     )
     parser.add_argument(
+        "--vcf-paths",
+        metavar="DRUG",
+        help="Print the VCF paths for the same sample as --predict. No LLM calls.",
+    )
+    parser.add_argument(
+        "--relative-to",
+        metavar="DIR",
+        help="[--vcf-paths] Print paths relative to this directory.",
+    )
+    parser.add_argument(
         "--vcf-root",
         metavar="DIR",
         help="[--predict] Directory the VCFs actually live in, replacing the "
@@ -153,13 +163,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--data-dir",
         metavar="DIR",
         default=str(DATA_DIR),
-        help=f"[--cohort --predict] Where the cohort files live (default: {DATA_DIR}).",
+        help=f"[--cohort --predict --vcf-paths] Cohort files (default: {DATA_DIR}).",
     )
     parser.add_argument(
         "--limit",
         type=int,
         default=20,
-        help="[--predict] Isolates to predict over (default: 20).",
+        help="[--predict --vcf-paths] Isolates to sample (default: 20).",
     )
     parser.add_argument(
         "--balance",
@@ -230,7 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--tools",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="Let A1 retrieve a relevant tool subset instead of carrying them all.",
     )
     parser.add_argument(
@@ -271,6 +281,26 @@ def run_search(args, output: Path | None) -> int:
     )
     rows = retrieve_papers(agent, args.search, max_papers, args.verbose)
     write_papers(rows, settings.label, args.search, output or Path("tb_papers.json"))
+    return 0
+
+
+def run_vcf_paths(args) -> int:
+    try:
+        cohort = load_cohort(args.data_dir)
+    except CohortError as e:
+        return fail(e)
+    samples = cohort.dataset(
+        args.vcf_paths, limit=max(1, args.limit), balance=args.balance, seed=args.seed
+    )
+    if not samples:
+        return fail(f"No labelled isolates for {args.vcf_paths!r}.")
+    paths = [Path(sample.vcf_path) for sample in samples]
+    if args.relative_to:
+        try:
+            paths = [path.relative_to(args.relative_to) for path in paths]
+        except ValueError as e:
+            return fail(str(e))
+    print(*paths, sep="\n")
     return 0
 
 
@@ -383,6 +413,8 @@ def main(argv: list[str] | None = None) -> int:
     output = Path(args.output) if args.output else None
     if args.cohort:
         return run_cohort(args, output)
+    if args.vcf_paths:
+        return run_vcf_paths(args)
     if args.predict:
         return run_predict(args, output)
     if args.search:

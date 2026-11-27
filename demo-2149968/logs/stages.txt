@@ -1,3 +1,0 @@
-cohort	ok
-predict rifampicin	ok
-screening	ok

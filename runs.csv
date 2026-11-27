@@ -1,2 +1,0 @@
-run_id,started_at,model,effort,drugs,isolates_per_drug,seed,host,slurm_job_id,git_commit,stages_ok,stages_failed,seconds,gpu_util_mean,gpu_mem_peak_mib,tok_per_s_mean,folder
-demo-2149968,2026-11-23T06:19:28,Qwen/Qwen3-8B-AWQ,low,rifampicin,4,0,gpu048,2149968,28275d546d13,3,,2396,91.1,12874,19.4,demo-2149968
